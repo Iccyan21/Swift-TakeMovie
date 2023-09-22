@@ -47,36 +47,26 @@ struct CameraView: View {
                 Spacer()
                 
                 HStack {
-                    // 保存してもう一度撮影ボタンを表示して撮影すると...
-                    if camera.isToken{
-                        Button(action: {if !camera.isSaved{camera.savePic()}}, label: {
-                            Text(camera.isSaved ? "Saved" : "Save")
-                                .foregroundColor(.black)
-                                .fontWeight(.semibold)
-                                .padding(.vertical,10)
-                                .padding(.horizontal,20)
-                                .background(Color.white)
-                                .clipShape(Capsule())
+                    if camera.isRecording {
+                        Button(action: camera.stopRecording, label: {
+                            Text("Stop")
+                                .foregroundColor(.white)
+                                .padding()
+                                .background(Color.red)
+                                .clipShape(Circle())
                         })
-                        .padding(.leading)
-                        
-                        Spacer()
-                        
                     } else {
-                        Button(action: camera.takePic, label:{
-                            ZStack{
-                                Circle()
-                                    .fill(Color.white)
-                                    .frame(width: 70,height: 70)
-                                //周りデザイン
-                                Circle()
-                                    .stroke(Color.white,lineWidth: 2)
-                                    .frame(width: 75,height: 75)
-                            }
+                        Button(action: camera.startRecording, label: {
+                            Text("Record")
+                                .foregroundColor(.white)
+                                .padding()
+                                .background(Color.red)
+                                .clipShape(Circle())
                         })
                     }
                 }
                 .frame(height: 75)
+
             }
             .onAppear(perform:{
                 camera.Check()
@@ -103,6 +93,13 @@ class CameraModel: NSObject,ObservableObject,AVCapturePhotoCaptureDelegate {
     @Published var isSaved = false
     
     @Published var picData = Data(count: 0)
+    
+    //撮影機能定義
+    var captureSession: AVCaptureSession!
+    var videoOutput: AVCaptureMovieFileOutput!
+    let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+    let audioDevice = AVCaptureDevice.default(for: .audio)
+    @Published var isRecording = false
     
     func Check() {
         //最初にカメラをチェックする許可を得ています
@@ -133,7 +130,7 @@ class CameraModel: NSObject,ObservableObject,AVCapturePhotoCaptureDelegate {
         //最初にカメラをチェックする許可を得ています
         switch photoAuthorizationStatus{
         case .authorized:
-            setUp()
+            checkMicrophonePermission()
             return
             //Setting Up Session
         case .notDetermined:
@@ -141,7 +138,7 @@ class CameraModel: NSObject,ObservableObject,AVCapturePhotoCaptureDelegate {
             PHPhotoLibrary.requestAuthorization { newStatus in
                 DispatchQueue.main.async {
                     if newStatus == .authorized {
-                        self.setUp()
+                        self.checkMicrophonePermission()
                     }
                 }
             }
@@ -153,6 +150,37 @@ class CameraModel: NSObject,ObservableObject,AVCapturePhotoCaptureDelegate {
             
         }
     }
+    //マイクチェック
+    func checkMicrophonePermission() {
+        let audioSession = AVAudioSession.sharedInstance()
+        switch audioSession.recordPermission {
+        case .granted:
+            // マイクのアクセス許可がある場合の処理
+            print("Microphone access granted")
+            self.setUp()
+        case .denied:
+            // マイクのアクセス許可がない場合の処理
+            print("Microphone access denied")
+        case .undetermined:
+            // ユーザーがまだマイクのアクセス許可を選択していない場合、許可をリクエスト
+            audioSession.requestRecordPermission { allowed in
+                DispatchQueue.main.async {
+                    if allowed {
+                        // ユーザーがマイクのアクセス許可を与えた場合の処理
+                        print("Microphone access granted")
+                        self.setUp()
+                    } else {
+                        // ユーザーがマイクのアクセス許可を拒否した場合の処理
+                        print("Microphone access denied")
+                    }
+                }
+            }
+        @unknown default:
+            // 未知のケース（将来のバージョンのiOSで新しいケースが追加された場合）
+            break
+        }
+    }
+    
     
     
     func setUp(){
@@ -160,26 +188,47 @@ class CameraModel: NSObject,ObservableObject,AVCapturePhotoCaptureDelegate {
         do {
             //setting configs ...
             self.session.beginConfiguration()
-            // change for your own ...
-            let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
             
-            let input = try AVCaptureDeviceInput(device: device!)
-            
-            //cheacking and adding session ...
-            if self.session.canAddInput(input){
-                self.session.addInput(input)
+            // Video Input
+            if let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) {
+                let videoInput = try AVCaptureDeviceInput(device: videoDevice)
+                if self.session.canAddInput(videoInput){
+                    self.session.addInput(videoInput)
+                }
             }
-            // same for output ...
+            
+            // Audio Input
+            if let audioDevice = AVCaptureDevice.default(for: .audio) {
+                let audioInput = try AVCaptureDeviceInput(device: audioDevice)
+                if self.session.canAddInput(audioInput) {
+                    self.session.addInput(audioInput)
+                }
+            }
+            
+            // Photo Output
             if self.session.canAddOutput(self.output){
                 self.session.addOutput(self.output)
             }
+            
+            // Movie File Output
+            videoOutput = AVCaptureMovieFileOutput()
+            if self.session.canAddOutput(videoOutput) {
+                self.session.addOutput(videoOutput)
+            }
+            
             self.session.commitConfiguration()
-            print("Good Condistion")
+            
+            // Start the session after configuration has been committed
+            self.session.startRunning()
+            
+            print("Good Condition")
         }
         catch {
             print(error.localizedDescription)
         }
     }
+
+
     // 撮影処理
     func takePic() {
         print("Success")
@@ -232,7 +281,58 @@ class CameraModel: NSObject,ObservableObject,AVCapturePhotoCaptureDelegate {
         
         print("saved Successfulley...")
     }
+    
+    //撮影処理
+    func startRecording() {
+        guard !isRecording else { return }
+        
+        let outputDirectory = FileManager.default.temporaryDirectory
+        let outputFilePath = outputDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("mov").path
+        let outputFileURL = URL(fileURLWithPath: outputFilePath)
+        
+        videoOutput.startRecording(to: outputFileURL, recordingDelegate: self)
+        isRecording = true
+    }
+    
+    func stopRecording() {
+        guard isRecording else {return}
+        videoOutput.stopRecording()
+        isRecording = false
+    }
+    
+    func saveVideo(at url: URL) {
+        // Check if the video at the URL can be saved to the photo library
+        if UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(url.path) {
+            // Save the video to the photo library
+            UISaveVideoAtPathToSavedPhotosAlbum(url.path, self, #selector(video(_:didFinishSavingWithError:contextInfo:)), nil)
+        }
+    }
+
+    @objc func video(_ videoPath: String, didFinishSavingWithError error: Error?, contextInfo info: AnyObject) {
+        if let error = error {
+            // Handle the error
+            print("Error saving video: \(error.localizedDescription)")
+        } else {
+            print("Video saved successfully")
+        }
+    }
 }
+
+extension CameraModel: AVCaptureFileOutputRecordingDelegate {
+    func fileOutput(_ output: AVCaptureFileOutput,
+                    didFinishRecordingTo outputFileURL: URL,
+                    from connections: [AVCaptureConnection],
+                    error: Error?) {
+        if let error = error {
+            print("Error recording movie: \(error.localizedDescription)")
+        } else {
+            print("Successfully recorded movie to: \(outputFileURL)")
+            // Save the recorded video to the photo library
+            saveVideo(at: outputFileURL)
+        }
+    }
+}
+
 
 struct CameraPreview: UIViewRepresentable {
     
@@ -247,9 +347,6 @@ struct CameraPreview: UIViewRepresentable {
         // Your Own Properties
         camera.preview.videoGravity = .resizeAspectFill
         view.layer.addSublayer(camera.preview)
-        
-        //カメラ起動
-        camera.session.startRunning()
         
         return view
     }

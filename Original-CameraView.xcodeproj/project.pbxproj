@@ -271,6 +271,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "写真を撮影するため";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "動画を撮影するため";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "写真を保存するため";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -302,6 +303,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "写真を撮影するため";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "動画を撮影するため";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "写真を保存するため";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
